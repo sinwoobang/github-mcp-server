@@ -1132,6 +1132,132 @@ func CreatePullRequestReview(getClient GetClientFn, t translations.TranslationHe
 		}
 }
 
+// GetConcisePullRequests creates a tool to get concise information about multiple pull requests.
+func GetConcisePullRequests(getClient GetClientFn, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
+	return mcp.NewTool("get_concise_pull_requests",
+			mcp.WithDescription(t("TOOL_GET_CONCISE_PULL_REQUESTS_DESCRIPTION", "Get concise information (ID, title, body) for multiple pull requests in bulk.")),
+			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+				Title:        t("TOOL_GET_CONCISE_PULL_REQUESTS_USER_TITLE", "Get concise pull requests"),
+				ReadOnlyHint: toBoolPtr(true),
+			}),
+			mcp.WithString("owner",
+				mcp.Required(),
+				mcp.Description("Repository owner"),
+			),
+			mcp.WithString("repo",
+				mcp.Required(),
+				mcp.Description("Repository name"),
+			),
+			mcp.WithString("state",
+				mcp.Description("Filter by state"),
+				mcp.Enum("open", "closed", "all"),
+			),
+			mcp.WithString("head",
+				mcp.Description("Filter by head user/org and branch"),
+			),
+			mcp.WithString("base",
+				mcp.Description("Filter by base branch"),
+			),
+			mcp.WithString("sort",
+				mcp.Description("Sort by"),
+				mcp.Enum("created", "updated", "popularity", "long-running"),
+			),
+			mcp.WithString("direction",
+				mcp.Description("Sort direction"),
+				mcp.Enum("asc", "desc"),
+			),
+			mcp.WithNumber("page",
+				mcp.Description("Page number for pagination (min 1)"),
+				mcp.Min(1),
+			),
+		),
+		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			owner, err := requiredParam[string](request, "owner")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			repo, err := requiredParam[string](request, "repo")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			state, err := OptionalParam[string](request, "state")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			head, err := OptionalParam[string](request, "head")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			base, err := OptionalParam[string](request, "base")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			sort, err := OptionalParam[string](request, "sort")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			direction, err := OptionalParam[string](request, "direction")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			page, err := OptionalIntParamWithDefault(request, "page", 1)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Always fetch 10 PRs at a time
+			perPage := 10
+
+			opts := &github.PullRequestListOptions{
+				State:     state,
+				Head:      head,
+				Base:      base,
+				Sort:      sort,
+				Direction: direction,
+				ListOptions: github.ListOptions{
+					PerPage: perPage,
+					Page:    page,
+				},
+			}
+
+			client, err := getClient(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get GitHub client: %w", err)
+			}
+			prs, resp, err := client.PullRequests.List(ctx, owner, repo, opts)
+			if err != nil {
+				return nil, fmt.Errorf("failed to list pull requests: %w", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			if resp.StatusCode != http.StatusOK {
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read response body: %w", err)
+				}
+				return mcp.NewToolResultError(fmt.Sprintf("failed to list pull requests: %s", string(body))), nil
+			}
+
+			// Create concise PR objects with only ID, title, and body
+			concisePRs := make([]map[string]interface{}, 0, len(prs))
+			for _, pr := range prs {
+				concisePR := map[string]interface{}{
+					"id":    pr.GetNumber(),
+					"title": pr.GetTitle(),
+					"body":  pr.GetBody(),
+				}
+				concisePRs = append(concisePRs, concisePR)
+			}
+
+			r, err := json.Marshal(concisePRs)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal response: %w", err)
+			}
+
+			return mcp.NewToolResultText(string(r)), nil
+		}
+}
+
 // CreatePullRequest creates a tool to create a new pull request.
 func CreatePullRequest(getClient GetClientFn, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("create_pull_request",

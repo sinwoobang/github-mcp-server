@@ -1720,6 +1720,166 @@ func Test_CreatePullRequest(t *testing.T) {
 	}
 }
 
+func Test_GetConcisePullRequests(t *testing.T) {
+	// Verify tool definition once
+	mockClient := github.NewClient(nil)
+	tool, _ := GetConcisePullRequests(stubGetClientFn(mockClient), translations.NullTranslationHelper)
+
+	assert.Equal(t, "get_concise_pull_requests", tool.Name)
+	assert.NotEmpty(t, tool.Description)
+	assert.Contains(t, tool.InputSchema.Properties, "owner")
+	assert.Contains(t, tool.InputSchema.Properties, "repo")
+	assert.Contains(t, tool.InputSchema.Properties, "state")
+	assert.Contains(t, tool.InputSchema.Properties, "head")
+	assert.Contains(t, tool.InputSchema.Properties, "base")
+	assert.Contains(t, tool.InputSchema.Properties, "sort")
+	assert.Contains(t, tool.InputSchema.Properties, "direction")
+	assert.Contains(t, tool.InputSchema.Properties, "page")
+	assert.ElementsMatch(t, tool.InputSchema.Required, []string{"owner", "repo"})
+
+	// Setup mock PRs for success case
+	mockPRs := []*github.PullRequest{
+		{
+			Number:  github.Ptr(42),
+			Title:   github.Ptr("First PR"),
+			State:   github.Ptr("open"),
+			HTMLURL: github.Ptr("https://github.com/owner/repo/pull/42"),
+			Body:    github.Ptr("This is the first PR"),
+			User: &github.User{
+				Login: github.Ptr("user1"),
+			},
+		},
+		{
+			Number:  github.Ptr(43),
+			Title:   github.Ptr("Second PR"),
+			State:   github.Ptr("closed"),
+			HTMLURL: github.Ptr("https://github.com/owner/repo/pull/43"),
+			Body:    github.Ptr("This is the second PR"),
+			User: &github.User{
+				Login: github.Ptr("user2"),
+			},
+		},
+	}
+
+	// Expected concise PR data
+	expectedConcisePRs := []map[string]interface{}{
+		{
+			"id":    42,
+			"title": "First PR",
+			"body":  "This is the first PR",
+		},
+		{
+			"id":    43,
+			"title": "Second PR",
+			"body":  "This is the second PR",
+		},
+	}
+
+	tests := []struct {
+		name                string
+		mockedClient        *http.Client
+		requestArgs         map[string]interface{}
+		expectError         bool
+		expectedConcisePRs  []map[string]interface{}
+		expectedErrMsg      string
+	}{
+		{
+			name: "successful concise PRs fetch",
+			mockedClient: mock.NewMockedHTTPClient(
+				mock.WithRequestMatchHandler(
+					mock.GetReposPullsByOwnerByRepo,
+					expectQueryParams(t, map[string]string{
+						"state":     "all",
+						"sort":      "created",
+						"direction": "desc",
+						"per_page":  "10", // Always 10 per page
+						"page":      "1",
+					}).andThen(
+						mockResponse(t, http.StatusOK, mockPRs),
+					),
+				),
+			),
+			requestArgs: map[string]interface{}{
+				"owner":     "owner",
+				"repo":      "repo",
+				"state":     "all",
+				"sort":      "created",
+				"direction": "desc",
+				"page":      float64(1),
+			},
+			expectError:        false,
+			expectedConcisePRs: expectedConcisePRs,
+		},
+		{
+			name: "PRs fetch fails",
+			mockedClient: mock.NewMockedHTTPClient(
+				mock.WithRequestMatchHandler(
+					mock.GetReposPullsByOwnerByRepo,
+					http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+						w.WriteHeader(http.StatusBadRequest)
+						_, _ = w.Write([]byte(`{"message": "Invalid request"}`))
+					}),
+				),
+			),
+			requestArgs: map[string]interface{}{
+				"owner": "owner",
+				"repo":  "repo",
+				"state": "invalid",
+			},
+			expectError:    true,
+			expectedErrMsg: "failed to list pull requests",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Setup client with mock
+			client := github.NewClient(tc.mockedClient)
+			_, handler := GetConcisePullRequests(stubGetClientFn(client), translations.NullTranslationHelper)
+
+			// Create call request
+			request := createMCPRequest(tc.requestArgs)
+
+			// Call handler
+			result, err := handler(context.Background(), request)
+
+			// Verify results
+			if tc.expectError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedErrMsg)
+				return
+			}
+
+			require.NoError(t, err)
+
+			// Parse the result and get the text content if no error
+			textContent := getTextResult(t, result)
+
+			// Unmarshal and verify the result
+			var returnedConcisePRs []map[string]interface{}
+			err = json.Unmarshal([]byte(textContent.Text), &returnedConcisePRs)
+			require.NoError(t, err)
+			assert.Len(t, returnedConcisePRs, 2)
+			
+			// Verify each PR has only id, title, and body
+			for i, pr := range returnedConcisePRs {
+				assert.Equal(t, 3, len(pr), "Concise PR should only have 3 fields: id, title, body")
+				assert.Equal(t, tc.expectedConcisePRs[i]["id"], pr["id"])
+				assert.Equal(t, tc.expectedConcisePRs[i]["title"], pr["title"])
+				assert.Equal(t, tc.expectedConcisePRs[i]["body"], pr["body"])
+				
+				// Ensure other fields are not present
+				_, hasState := pr["state"]
+				_, hasURL := pr["html_url"]
+				_, hasUser := pr["user"]
+				assert.False(t, hasState, "state field should not be present")
+				assert.False(t, hasURL, "html_url field should not be present")
+				assert.False(t, hasUser, "user field should not be present")
+			}
+		})
+	}
+}
+
 func Test_AddPullRequestReviewComment(t *testing.T) {
 	mockClient := github.NewClient(nil)
 	tool, _ := AddPullRequestReviewComment(stubGetClientFn(mockClient), translations.NullTranslationHelper)
