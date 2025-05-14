@@ -1166,7 +1166,7 @@ func GetConcisePullRequests(getClient GetClientFn, t translations.TranslationHel
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			
+
 			pullNumberInterfaces, err := requiredParam[interface{}](request, "pullNumbers")
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
