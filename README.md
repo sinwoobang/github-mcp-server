@@ -1,5 +1,7 @@
 # GitHub MCP Server
 
+NOTE: It is an experimental repo for getting multiple pull requests in bulk.
+
 The GitHub MCP Server is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction)
 server that provides seamless integration with GitHub APIs, enabling advanced
 automation and interaction capabilities for developers and tools.
@@ -47,7 +49,7 @@ For manual installation, add the following JSON block to your User Settings (JSO
           "--rm",
           "-e",
           "GITHUB_PERSONAL_ACCESS_TOKEN",
-          "ghcr.io/github/github-mcp-server"
+          "ghcr.io/sinwoobang/github-mcp-server"
         ],
         "env": {
           "GITHUB_PERSONAL_ACCESS_TOKEN": "${input:github_token}"
@@ -80,7 +82,7 @@ Optionally, you can add a similar example (i.e. without the mcp key) to a file c
         "--rm",
         "-e",
         "GITHUB_PERSONAL_ACCESS_TOKEN",
-        "ghcr.io/github/github-mcp-server"
+        "ghcr.io/sinwoobang/github-mcp-server"
       ],
       "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${input:github_token}"
@@ -106,7 +108,7 @@ More about using MCP server tools in VS Code's [agent mode documentation](https:
         "--rm",
         "-e",
         "GITHUB_PERSONAL_ACCESS_TOKEN",
-        "ghcr.io/github/github-mcp-server"
+        "ghcr.io/sinwoobang/github-mcp-server"
       ],
       "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "<YOUR_TOKEN>"
@@ -179,7 +181,7 @@ When using Docker, you can pass the toolsets as environment variables:
 docker run -i --rm \
   -e GITHUB_PERSONAL_ACCESS_TOKEN=<your-token> \
   -e GITHUB_TOOLSETS="repos,issues,pull_requests,code_security,experiments" \
-  ghcr.io/github/github-mcp-server
+  ghcr.io/sinwoobang/github-mcp-server
 ```
 
 ### The "all" Toolset
@@ -216,7 +218,7 @@ When using Docker, you can pass the toolsets as environment variables:
 docker run -i --rm \
   -e GITHUB_PERSONAL_ACCESS_TOKEN=<your-token> \
   -e GITHUB_DYNAMIC_TOOLSETS=1 \
-  ghcr.io/github/github-mcp-server
+  ghcr.io/sinwoobang/github-mcp-server
 ```
 
 ## GitHub Enterprise Server
@@ -236,7 +238,7 @@ Prefix the hostname with the `https://` URI scheme, as it otherwise defaults to 
     "GITHUB_PERSONAL_ACCESS_TOKEN",
     "-e",
     "GITHUB_HOST",
-    "ghcr.io/github/github-mcp-server"
+    "ghcr.io/sinwoobang/github-mcp-server"
     ],
     "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${input:github_token}",
