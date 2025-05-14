@@ -1207,15 +1207,16 @@ func GetConcisePullRequests(getClient GetClientFn, t translations.TranslationHel
 						errs[i] = fmt.Errorf("failed to get pull request: %w", err)
 						return
 					}
+					prs[i] = pr
 					defer func() { _ = resp.Body.Close() }()
 				}(i, pullNumber)
 			}
 			wg.Wait()
+
 			for i, err := range errs {
 				if err != nil {
 					return nil, fmt.Errorf("failed to get pull request %d: %w", pullNumbersInt[i], err)
 				}
-				prs[i] = prs[i]
 			}
 			// Check if any of the responses were not OK
 			for i, pr := range prs {
