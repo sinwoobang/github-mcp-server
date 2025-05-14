@@ -1167,12 +1167,14 @@ func GetConcisePullRequests(getClient GetClientFn, t translations.TranslationHel
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			pullNumberInterfaces, err := requiredParam[interface{}](request, "pullNumbers")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			// Get the raw pullNumbers value from the request
+			pullNumbersRaw, exists := request.Params.Arguments["pullNumbers"]
+			if !exists {
+				return mcp.NewToolResultError("pullNumbers parameter is required"), nil
 			}
 
-			pullNumberArr, ok := pullNumberInterfaces.([]interface{})
+			// Check if it's an array
+			pullNumberArr, ok := pullNumbersRaw.([]any)
 			if !ok {
 				return mcp.NewToolResultError("pull numbers must be an array"), nil
 			}
@@ -1180,9 +1182,12 @@ func GetConcisePullRequests(getClient GetClientFn, t translations.TranslationHel
 			if len(pullNumberArr) > 10 {
 				return mcp.NewToolResultError("maximum of 10 pull numbers allowed"), nil
 			}
+			
+			// Convert array elements to integers
 			pullNumbersInt := make([]int, len(pullNumberArr))
 			for i, v := range pullNumberArr {
-				if num, ok := v.(int); ok {
+				// JSON numbers are decoded as float64 by default
+				if num, ok := v.(float64); ok {
 					pullNumbersInt[i] = int(num)
 				} else {
 					return mcp.NewToolResultError("pull numbers must be integers"), nil
