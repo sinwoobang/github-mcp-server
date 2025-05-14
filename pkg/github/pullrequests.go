@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 
 	"github.com/github/github-mcp-server/pkg/translations"
 	"github.com/google/go-github/v69/github"
@@ -1148,27 +1149,12 @@ func GetConcisePullRequests(getClient GetClientFn, t translations.TranslationHel
 				mcp.Required(),
 				mcp.Description("Repository name"),
 			),
-			mcp.WithString("state",
-				mcp.Description("Filter by state"),
-				mcp.Enum("open", "closed", "all"),
-			),
-			mcp.WithString("head",
-				mcp.Description("Filter by head user/org and branch"),
-			),
-			mcp.WithString("base",
-				mcp.Description("Filter by base branch"),
-			),
-			mcp.WithString("sort",
-				mcp.Description("Sort by"),
-				mcp.Enum("created", "updated", "popularity", "long-running"),
-			),
-			mcp.WithString("direction",
-				mcp.Description("Sort direction"),
-				mcp.Enum("asc", "desc"),
-			),
-			mcp.WithNumber("page",
-				mcp.Description("Page number for pagination (min 1)"),
-				mcp.Min(1),
+			mcp.WithArray("pullNumbers",
+				mcp.Required(),
+				mcp.Description("Pull request numbers (up to 10)"),
+				mcp.Items(
+					[]int{},
+				),
 			),
 		),
 		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1180,65 +1166,64 @@ func GetConcisePullRequests(getClient GetClientFn, t translations.TranslationHel
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			state, err := OptionalParam[string](request, "state")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			head, err := OptionalParam[string](request, "head")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			base, err := OptionalParam[string](request, "base")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			sort, err := OptionalParam[string](request, "sort")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			direction, err := OptionalParam[string](request, "direction")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			page, err := OptionalIntParamWithDefault(request, "page", 1)
+			
+			pullNumberInterfaces, err := requiredParam[interface{}](request, "pullNumbers")
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			// Always fetch 10 PRs at a time
-			perPage := 10
-
-			opts := &github.PullRequestListOptions{
-				State:     state,
-				Head:      head,
-				Base:      base,
-				Sort:      sort,
-				Direction: direction,
-				ListOptions: github.ListOptions{
-					PerPage: perPage,
-					Page:    page,
-				},
+			pullNumberArr, ok := pullNumberInterfaces.([]interface{})
+			if !ok {
+				return mcp.NewToolResultError("pull numbers must be an array"), nil
 			}
 
+			if len(pullNumberArr) > 10 {
+				return mcp.NewToolResultError("maximum of 10 pull numbers allowed"), nil
+			}
+			pullNumbersInt := make([]int, len(pullNumberArr))
+			for i, v := range pullNumberArr {
+				if num, ok := v.(int); ok {
+					pullNumbersInt[i] = int(num)
+				} else {
+					return mcp.NewToolResultError("pull numbers must be integers"), nil
+				}
+			}
 			client, err := getClient(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get GitHub client: %w", err)
 			}
-			prs, resp, err := client.PullRequests.List(ctx, owner, repo, opts)
-			if err != nil {
-				return nil, fmt.Errorf("failed to list pull requests: %w", err)
-			}
-			defer func() { _ = resp.Body.Close() }()
+			prs := make([]*github.PullRequest, len(pullNumbersInt))
 
-			if resp.StatusCode != http.StatusOK {
-				body, err := io.ReadAll(resp.Body)
+			// use go routine to fetch pull requests in parallel
+			errs := make([]error, len(pullNumbersInt))
+			var wg sync.WaitGroup
+
+			for i, pullNumber := range pullNumbersInt {
+				wg.Add(1)
+				go func(i, pullNumber int) {
+					defer wg.Done()
+					pr, resp, err := client.PullRequests.Get(ctx, owner, repo, pullNumber)
+					if err != nil {
+						errs[i] = fmt.Errorf("failed to get pull request: %w", err)
+						return
+					}
+					defer func() { _ = resp.Body.Close() }()
+				}(i, pullNumber)
+			}
+			wg.Wait()
+			for i, err := range errs {
 				if err != nil {
-					return nil, fmt.Errorf("failed to read response body: %w", err)
+					return nil, fmt.Errorf("failed to get pull request %d: %w", pullNumbersInt[i], err)
 				}
-				return mcp.NewToolResultError(fmt.Sprintf("failed to list pull requests: %s", string(body))), nil
+				prs[i] = prs[i]
+			}
+			// Check if any of the responses were not OK
+			for i, pr := range prs {
+				if pr == nil {
+					return mcp.NewToolResultError(fmt.Sprintf("failed to get pull request %d", pullNumbersInt[i])), nil
+				}
 			}
 
-			// Create concise PR objects with only ID, title, and body
 			concisePRs := make([]map[string]interface{}, 0, len(prs))
 			for _, pr := range prs {
 				concisePR := map[string]interface{}{
